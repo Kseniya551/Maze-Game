@@ -1,0 +1,717 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <windows.h>
+
+#define CLEAR "cls"
+
+
+#define GRID_SIZE_EASY 3
+#define MONSTER_SIZE_EASY 3
+#define HEART_SIZE_EASY 1
+
+#define GRID_SIZE_MEDIUM 5
+#define MONSTER_SIZE_MEDIUM 5
+#define HEART_SIZE_MEDIUM 3
+
+#define GRID_SIZE_HARD 6
+#define MONSTER_SIZE_HARD 6
+#define HEART_SIZE_HARD 4
+#define SURPRISE_SIZE_HARD 6
+
+#define START_INDEX_EASY 9
+#define START_INDEX_MEDIUM 25
+#define START_INDEX_HARD 36
+
+#define MAX_GRID 6
+#define MAX_INDEX 36
+#define SAVE_FILE "savegame.txt"
+
+// Define a struct to hold game entities
+typedef struct {
+    int locations[MONSTER_SIZE_HARD]; // Assuming max monsters for hard level
+    int size;
+    //int surprise[SURPRISE_SIZE_HARD]; // Assuming max surprise for hard level
+    int used_locations[MAX_INDEX];
+} EntityLocations;
+
+// Function to save the game state to a file
+void save_game(int exit, EntityLocations monsters, EntityLocations hearts, EntityLocations surprise, int current_heart, int grid_size, int current_index, EntityLocations used_indices, int used_count, char grid_display[][MAX_GRID], int errormove) {
+    FILE* file = fopen(SAVE_FILE, "wb");
+    if (file) {
+        fwrite(&grid_size, sizeof(int), 1, file);
+        fwrite(&exit, sizeof(int), 1, file);
+        fwrite(&monsters, sizeof(EntityLocations), 1, file);
+        fwrite(&hearts, sizeof(EntityLocations), 1, file);
+        fwrite(&surprise, sizeof(EntityLocations), 1, file);
+        fwrite(&current_heart, sizeof(int), 1, file);
+        fwrite(&current_index, sizeof(int), 1, file);
+        fwrite(&used_count, sizeof(int), 1, file);
+        //fwrite(&used_indices, sizeof(EntityLocations), used_count, file);
+        fwrite(used_indices.used_locations, sizeof(int), used_count, file); // Save the array
+        fwrite(grid_display, sizeof(char), grid_size * grid_size, file);
+        fwrite(&errormove, sizeof(int), 1, file);
+        fclose(file);
+        printf("Game saved successfully!\n");
+    }
+    else {
+        printf("Error saving game!\n");
+    }
+}
+
+// Function to load the game state from a file
+int load_game(int* exit, EntityLocations* monsters, EntityLocations* hearts, EntityLocations* surprise, int* current_heart, int* grid_size, int* current_index, EntityLocations* used_indices, int* used_count, char grid_display[][MAX_GRID], int* errormove) {
+    FILE* file = fopen(SAVE_FILE, "rb");
+    if (file) {
+        fread(grid_size, sizeof(int), 1, file);
+        fread(exit, sizeof(int), 1, file);
+        fread(monsters, sizeof(EntityLocations), 1, file);
+        fread(hearts, sizeof(EntityLocations), 1, file);
+        fread(surprise, sizeof(EntityLocations), 1, file);
+        fread(current_heart, sizeof(int), 1, file);
+        fread(current_index, sizeof(int), 1, file);
+        fread(used_count, sizeof(int), 1, file);
+        //fread(used_indices, sizeof(EntityLocations), 1, file);
+        fread(used_indices->used_locations, sizeof(int), *used_count, file); // Load the array
+        fread(grid_display, sizeof(char), (*grid_size) * (*grid_size), file);
+        fread(errormove, sizeof(int), 1, file);
+        fclose(file);
+        printf("Game loaded successfully!\n");
+        return 1; // Return 1 if loaded successfully
+    }
+    else {
+        printf("No saved game found!\n");
+        return 0; // Return 0 if no saved game
+    }
+}
+
+//the game itself
+void game(int exit, EntityLocations monsters, EntityLocations hearts, int current_heart, int grid_size, int start_index, EntityLocations surprise, EntityLocations used_indices, int load_flag) {
+    int result = 0;
+    int input_check = 0;
+    int grid[MAX_GRID][MAX_GRID];
+    char grid_display[MAX_GRID][MAX_GRID];
+    int current_index = start_index;
+    int used_count = 1;
+    int errormove = 0;
+
+    HANDLE  color = GetStdHandle(STD_OUTPUT_HANDLE);
+
+    // Initialize grid for a new game (in case of a new game or failed load)
+    int num = 1;
+    for (int i = 0; i < grid_size; i++) {
+        for (int j = 0; j < grid_size; j++) {
+            grid[i][j] = num++;
+            grid_display[i][j] = ' ';
+        }
+    }
+    int start_row = (start_index - 1) / grid_size;
+    int start_col = (start_index - 1) % grid_size;
+    grid_display[start_row][start_col] = 'o';
+
+
+    // If game was loaded, update grid_display with previous moves
+    // load_flag is determined in main and passed to game implicitly
+    if (load_flag) {
+        for (int i = 0; i < (grid_size * grid_size) - 1; i++) {
+            int prev_row = (used_indices.used_locations[i] - 1) / grid_size;
+            int prev_col = (used_indices.used_locations[i] - 1) % grid_size;
+            if (prev_row >= 0 && prev_row < grid_size && prev_col >= 0 && prev_col < grid_size) {
+                grid_display[prev_row][prev_col] = 'x';
+            }
+        }
+        int current_row = (current_index - 1) / grid_size;
+        int current_col = (current_index - 1) % grid_size;
+        if (current_row >= 0 && current_row < grid_size && current_col >= 0 && current_col < grid_size) {
+            grid_display[current_row][current_col] = 'o'; // Ensure current position is 'o'
+        }
+    }
+    else {
+        used_indices.used_locations[0] = start_index;
+    }
+
+    while (used_count < grid_size * grid_size) {
+        // Print the grid
+        printf(" +");
+        for (int i = 0; i < grid_size; i++) {
+            printf("---+");
+        }
+        printf("\n");
+        for (int i = 0; i < grid_size; i++) {
+            printf(" |");
+            for (int j = 0; j < grid_size; j++) {
+                if (grid_display[i][j] == 'o' || grid_display[i][j] == 'x') {
+                    printf(" %c |", grid_display[i][j]);
+                }
+                else {
+                    printf("%2d |", grid[i][j]);
+                }
+            }
+            printf("\n +");
+            for (int k = 0; k < grid_size; k++) {
+                printf("---+");
+            }
+            printf("\n");
+        }
+        printf("\n\nyou have %d hearts\n", current_heart);
+
+        // Check available moves
+        int available_moves[4] = { 0 }; // left, right, up, down
+        int move_count = 0;
+
+        int current_row = (current_index - 1) / grid_size;
+        int current_col = (current_index - 1) % grid_size;
+
+        // Check left
+        if (current_col > 0 && grid_display[current_row][current_col - 1] == ' ') {
+            available_moves[move_count++] = current_index - 1;
+        }
+        // Check right
+        if (current_col < grid_size - 1 && grid_display[current_row][current_col + 1] == ' ') {
+            available_moves[move_count++] = current_index + 1;
+        }
+        // Check up
+        if (current_row > 0 && grid_display[current_row - 1][current_col] == ' ') {
+            available_moves[move_count++] = current_index - grid_size;
+        }
+        // Check down
+        if (current_row < grid_size - 1 && grid_display[current_row + 1][current_col] == ' ') {
+            available_moves[move_count++] = current_index + grid_size;
+        }
+
+        if (move_count == 0) {
+            printf("\n\nYou are stuck! You lost.\n");
+            break; // End the game
+        }
+
+        printf("Available moves: ");
+        for (int i = 0; i < move_count; i++) {
+            printf("%d ", available_moves[i]);
+        }
+        printf("\n");
+
+        int next_index;
+        printf("Enter the next index to move to (or 'Q' to save): ");
+        char input[10];
+        scanf_s("%9s", input, 10);
+        while (getchar() != '\n'); // Clear input buffer
+
+        if (input[0] == 'Q' || input[0] == 'q') {
+            save_game(exit, monsters, hearts, surprise, current_heart, grid_size, current_index, used_indices, used_count, grid_display, errormove);
+            char exit_ccontinue_input[10];
+            printf("if you want to countinue playing enter 'Y' if you want to exit the game enter 'N'");
+            scanf_s("%9s", exit_ccontinue_input, 10);
+            while (getchar() != '\n'); // Clear input buffer
+            if (exit_ccontinue_input[0] == 'Y' || exit_ccontinue_input[0] == 'y') {
+                continue; // Go to the next iteration to allow further moves or saving
+            }
+            else if (exit_ccontinue_input[0] == 'N' || exit_ccontinue_input[0] == 'n') {
+                printf("Thanks for playing!\n");
+                break; // Exit the game
+            }
+            else {
+                printf("Invalid input.Continuing the game anyway.\n");
+                continue; // Go to the next iteration to allow further moves or saving
+            }
+        }
+
+        input_check = sscanf_s(input, "%d", &next_index);
+
+        if (input_check != 1) {
+            printf("\n\nInvalid input. Please choose from the available moves or 'Q' to save.\n");
+            errormove++;
+            if (errormove == 4) {
+                printf("\n\nyou have 1 more try to enter correct index before the game endes\n");
+            }
+            if (errormove == 5) {
+                printf("\n\n\nyou are not good at this game, try again next time \n");
+                break;
+            }
+            continue; // Skip the rest of the loop and ask for input again
+        }
+
+        // Validate the move
+        int valid_move = 0;
+        for (int i = 0; i < move_count; i++) {
+            if (available_moves[i] == next_index) {
+                valid_move = 1;
+                break;
+            }
+        }
+
+        if (valid_move) {
+            // Mark the previous position with 'x'
+            grid_display[current_row][current_col] = 'x';
+
+            // Update the current position
+            current_index = next_index;
+            current_row = (current_index - 1) / grid_size;
+            current_col = (current_index - 1) % grid_size;
+            grid_display[current_row][current_col] = 'o';
+
+            //check if you went into a room with a surprise
+            current_heart = check_surprise(current_index, surprise.locations, surprise.size, current_heart, exit);
+
+            if (current_heart == 100) {
+                SetConsoleTextAttribute(color, 0x0007 | 0x0056);//purple
+                printf("the secret portal took you to the exit and you won the game!\n");
+                SetConsoleTextAttribute(color, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+                break;
+            }
+
+            //-----------------from here its checks if the room has somthing........
+            //check if you went into a room with a monster and takes a live from you and in case you have 0 lives gives a messege
+            //that you died
+            current_heart = check_monster(current_index, monsters.locations, monsters.size, current_heart);
+            if (current_heart == 0) {
+                SetConsoleTextAttribute(color, BACKGROUND_RED);
+                printf("\n\nyou died and lost the game\n");
+                SetConsoleTextAttribute(color, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+                break;
+            }
+
+            // checks if you found the exit
+            result = check_exit(current_index, exit);
+            if (result == 1) {
+                break;
+            }
+
+            // checks if you found a heart
+            current_heart = check_heart(current_index, hearts.locations, hearts.size, current_heart);
+
+            // -------------------.....or if its empty
+
+            // Add the index to used indices
+            used_indices.used_locations[used_count++] = next_index;
+            errormove = 0; // Reset error move counter on a valid move
+        }
+        else {
+            printf("\n\nInvalid move. Please choose from the available moves.\n");
+            errormove++;
+            if (errormove == 4) {
+                printf("\n\nyou have 1 more try to enter correct index before the game endes\n");
+            }
+            if (errormove == 5) {
+                printf("\n\n\nyou are not good at this game, try again next time \n");
+                break;
+            }
+        }
+    }
+}
+
+void check_if_double(int arr[], int size, int grid_max) {
+    for (int i = 0; i < size; i++) {
+        for (int j = 0; j < size; j++) {
+            if (i != j && arr[i] == arr[j]) {
+                //i!=j is for the computer to not thinks there are doublr
+                arr[i] = arr[i] + 6;
+                if (arr[i] >= grid_max) {
+                    arr[i] = (arr[i] % grid_max) + 1;
+                }
+                j = -1;//to check again if there are any more double
+            }
+            else if (arr[i] == 0) {
+                arr[i]++;
+            }
+        }
+    }
+}
+
+// check if there are double with ((monster or heart or surprise) and exit)
+void check_double_with_exit(int arr[], int size, int exit, int grid_max) {
+    for (int i = 0; i < size; i++) {
+        if (arr[i] == exit) {
+            arr[i] = arr[i] + 3;
+            if (arr[i] >= grid_max) {
+                arr[i] = (arr[i] % grid_max) + 1;
+            }
+        }
+        else if (arr[i] == 0) {
+            arr[i]++;
+        }
+    }
+}
+
+// check if there are doubles with monster and heart
+void check_monster_heart_double(int arr_monster[], int monster_size, int arr_heart[], int heart_size, int grid_max) {
+    for (int i = 0; i < monster_size; i++) {
+        for (int j = 0; j < heart_size; j++) {
+            while (arr_monster[i] == arr_heart[j]) {
+                arr_monster[i] = arr_monster[i] + 9;
+                if (arr_monster[i] >= grid_max) {
+                    arr_monster[i] = (arr_monster[i] % grid_max) + 1;
+                }
+                j = -1;//to check again if there are any more double
+            }
+            if (arr_monster[i] == 0) {
+                arr_monster[i]++;
+            }
+        }
+    }
+}
+
+// check if there are doubles with surprise and monster or heart
+void check_surprise_diffrent_double(int arr_surprise[], int surprise_size, int arr_diffrent[], int diffrent_size, int grid_max) {
+    for (int i = 0; i < surprise_size; i++) {
+        for (int j = 0; j < diffrent_size; j++) {
+            while (arr_surprise[i] == arr_diffrent[j]) {
+                arr_surprise[i] = arr_surprise[i] + 2;
+                if (arr_surprise[i] > MAX_INDEX) {
+                    arr_surprise[i] = (arr_surprise[i] - 1) % MAX_INDEX + 1;
+                }
+                j = -1;//to check again if there are any more double
+            }
+            if (arr_surprise[i] == grid_max) {
+                arr_surprise[i] = arr_surprise[i] % 10;
+            }
+            else if (arr_surprise[i] == 0) {
+                arr_surprise[i]++;
+            }
+        }
+    }
+}
+
+// 'random' calc where will be the exit
+int exit_calc(int grid_max) {
+    int exit = 0;
+    exit = (rand() % grid_max);
+    if (exit == 0) {
+        exit++;
+    }
+    else if (exit == grid_max) {
+        exit = exit % 10;
+    }
+    return exit;
+}
+
+//check if the player found the exit
+int check_exit(int location, int exit) {
+    int result = 0;
+    HANDLE  color = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (location == exit) {
+        SetConsoleTextAttribute(color, 0x0006); //yellow
+        printf("\n\n\nyou found the exit and you won the game!\n Good job!\n");
+        SetConsoleTextAttribute(color, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+        result = 1;
+    }
+    return result;
+}
+
+//puts monsters into 'random' rooms
+void put_monster(int arr_monster[], int size, int grid_max) {
+    for (int i = 0; i < size; i++) {
+        arr_monster[i] = (rand() % (grid_max - 1)) + 1;
+    }
+}
+
+//puts surprises into 'random' rooms
+void put_surprise(int arr_suprise[], int size, int grid_max) {
+    for (int i = 0; i < size; i++) {
+        arr_suprise[i] = (rand() % (grid_max - 1)) + 1;
+    }
+}
+
+//check if the player entered a room with a surprise
+int check_surprise(int location, int arr_surprise[], int surprise_size, int current_heart, int exit) {
+    HANDLE  color = GetStdHandle(STD_OUTPUT_HANDLE);
+    for (int i = 0; i < surprise_size; i++) {
+        if (location == arr_surprise[i]) {
+            printf("\n\nyou walked into a room with a surprise! \n the surprise is:\n");
+            switch (i) {
+            case 0:
+                SetConsoleTextAttribute(color, FOREGROUND_RED);
+                printf("\n\nyou fell into a pit and lost a heart! \n");
+                current_heart = remove_heart(current_heart);
+                SetConsoleTextAttribute(color, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+                break;
+            case 1:
+                SetConsoleTextAttribute(color, FOREGROUND_BLUE);
+                printf("\n\nyou found a magic potion and got an heart!\n");
+                current_heart = add_heart(current_heart);
+                SetConsoleTextAttribute(color, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+                break;
+            case 2:
+                SetConsoleTextAttribute(color, FOREGROUND_GREEN);
+                printf("\n\nyou found a map!\n");
+                printf("you got a clue where the exit is!\n");
+                if (exit >= 1 && exit <= 6) {
+                    printf("the exit in the first line of rooms! \n");
+                }
+                else if (exit >= 7 && exit <= 12) {
+                    printf("the exit in the second line of rooms! \n");
+                }
+                else if (exit >= 13 && exit <= 18) {
+                    printf("the exit in the third line of rooms! \n");
+                }
+                else if (exit >= 19 && exit <= 24) {
+                    printf("the exit in the fourth line of rooms! \n");
+                }
+                else if (exit >= 25 && exit <= 30) {
+                    printf("the exit in the fifth line of rooms! \n");
+                }
+                else if (exit >= 31 && exit <= 36) {
+                    printf("the exit in the sixth line of rooms! \n");
+                }
+                SetConsoleTextAttribute(color, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+                break;
+            case 3:
+                SetConsoleTextAttribute(color, FOREGROUND_BLUE);
+                printf("\n\nyou found a shield and because of that you got a heart!\n");
+                current_heart = add_heart(current_heart);
+                SetConsoleTextAttribute(color, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+                break;
+            case 4:
+                SetConsoleTextAttribute(color, FOREGROUND_RED);
+                printf("\n\nyou found a room with a sleeping monsters and you just woke him up!\n you lost a heart!\n");
+                current_heart = remove_heart(current_heart);
+                SetConsoleTextAttribute(color, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+                break;
+            case 5:
+                SetConsoleTextAttribute(color, 0x0007 | 0x0056); //purple
+                printf("\n\nyou found a secret portal!\n");
+                current_heart = 100;
+                SetConsoleTextAttribute(color, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+                break;
+            }
+        }
+    }
+    return current_heart;
+}
+
+int check_exit_if_zero(int exit) {
+    if (exit == 0) {
+        exit++;
+    }
+    return exit;
+}
+
+//puts hearts into 'random' rooms
+void put_heart(int arr_heart[], int size, int grid_max) {
+    for (int i = 0; i < size; i++) {
+        arr_heart[i] = (rand() % (grid_max - 1) + 1);
+    }
+}
+
+//checks if you in a room with a monster
+int check_monster(int location, int arr_monster[], int monster_size, int current_heart) {
+    HANDLE  color = GetStdHandle(STD_OUTPUT_HANDLE);
+    for (int i = 0; i < monster_size; i++) {
+        if (location == arr_monster[i]) {
+            current_heart = remove_heart(current_heart);
+            SetConsoleTextAttribute(color, FOREGROUND_RED);
+            printf("You walked into a room with a monster and lost a heart\n");
+            printf("Your current amount of hearts is %d \n", current_heart);
+            SetConsoleTextAttribute(color, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+        }
+    }
+    return current_heart;
+}
+
+//check if the player entered a room with an heart
+int check_heart(int location, int arr_heart[], int heart_size, int current_heart) {
+    HANDLE  color = GetStdHandle(STD_OUTPUT_HANDLE);
+    for (int i = 0; i < heart_size; i++) {
+        if (location == arr_heart[i]) {
+            current_heart = add_heart(current_heart);
+            SetConsoleTextAttribute(color, FOREGROUND_BLUE);
+            printf("You walked into a room with a heart and you just gained a heart!\n");
+            printf("Your current amount of hearts is %d \n", current_heart);
+            SetConsoleTextAttribute(color, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+        }
+    }
+    return current_heart;
+}
+
+//remove hearts to player
+int remove_heart(int current_heart) {
+    current_heart--;
+    return current_heart;
+}
+
+//add hearts to player
+int add_heart(int current_heart) {
+    current_heart++;
+    return current_heart;
+}
+
+void for_self_info(int exit_result, EntityLocations monsters, EntityLocations hearts, EntityLocations surprise) {
+    printf("\n\n\n");
+    printf("\nall the info after getting the 'random' result:\n");
+    printf("the monsters are in: ");
+    for (int i = 0; i < monsters.size; i++) {
+        printf("%d ", monsters.locations[i]);
+    }
+    printf("\n");
+    printf("the hearts are in: ");
+    for (int i = 0; i < hearts.size; i++) {
+        printf("%d ", hearts.locations[i]);
+    }
+    printf("\n");
+    printf("the exit are in: %d\n", exit_result);
+    printf("\n");
+    printf("the surprise are in: ");
+    for (int i = 0; i < surprise.size; i++) {
+        printf("%d ", surprise.locations[i]);
+    }
+    printf("\n\n\n");
+}
+
+int main() {
+    int exit_result;
+    EntityLocations monsters;
+    EntityLocations hearts;
+    EntityLocations surprise;
+    EntityLocations used_indices;
+    int current_heart = 3;
+    int grid_size = 0;
+    int monster_size = 0;
+    int heart_size = 0;
+    int start_index = 0;
+    int surprise_size = 0;
+    int errormove = 1;
+    int input_check;
+    int load_flag = 0;
+    char load_choice[2];
+    int used_count = 1;
+    char grid_display[MAX_GRID][MAX_GRID];
+    int current_index_loaded = 0; // To store loaded current index
+
+    srand(time(NULL)); // Seed the random number generator
+
+    // Ask the player if they want to load a saved game
+    printf("Press 'L' to load saved game, or any other key to start new game: ");
+    scanf_s("%1s", load_choice, 2);
+    while (getchar() != '\n'); // Clear input buffer
+
+    if (load_choice[0] == 'L' || load_choice[0] == 'l') {
+        load_flag = load_game(&exit_result, &monsters, &hearts, &surprise, &current_heart, &grid_size, &current_index_loaded, &used_indices, &used_count, grid_display, &errormove);
+        if (load_flag) {
+            printf("Resuming saved game...\n");
+            start_index = current_index_loaded; // Set start index to loaded current index
+            // Skip difficulty selection as the game is loaded
+        }
+        else {
+            printf("No saved game found! Starting a new game...\n");
+            // Proceed with difficulty level selection
+        }
+    }
+    else {
+        printf("Starting a new game...\n");
+        // Proceed with difficulty level selection
+    }
+
+    if (!load_flag) {
+        //opening for the player to know what they supposed to do and how to play
+        printf("\nWelcome to my game!\nYou need to find the exit without dying \n");
+        printf("Your start point declared as 'o' and you will see it in the grid\n");
+        printf("Your options are going up, down, left, right\n");
+        printf("There are 'rooms' with nothing, rooms with 'monsters' that will take 1 life from you\n");
+        printf("And rooms that will give you an extra life\n");
+        printf("So choose wisely\n");
+        printf("If you got stuck you will lose the game\n");
+        printf("If you find the exit you will win the game!\n");
+        printf("take notice that the exit can be anywhere in the grid even in the middle\n");
+        printf("If you make 5 incorrect moves one after another you will end the game\n ");
+        printf("You start with %d lives\n", current_heart);
+        printf("if you choose the level hard you will have rooms with surprises in addition to evrything else!\n");
+
+        // ask the player to choose a difficulty level
+        printf("\n\nchoose difficulty level:\n");
+        printf("1 - Easy \n");
+        printf("2 - Medium \n");
+        printf("3 - Hard \n");
+        int level;
+        input_check = scanf_s("%d", &level);
+        if (input_check == 1) {
+            switch (level) {
+            case 1:
+                grid_size = GRID_SIZE_EASY;
+                monster_size = MONSTER_SIZE_EASY;
+                heart_size = HEART_SIZE_EASY;
+                start_index = START_INDEX_EASY;
+                surprise_size = 0;
+                break;
+            case 2:
+                grid_size = GRID_SIZE_MEDIUM;
+                monster_size = MONSTER_SIZE_MEDIUM;
+                heart_size = HEART_SIZE_MEDIUM;
+                start_index = START_INDEX_MEDIUM;
+                surprise_size = 0;
+                break;
+            case 3:
+                grid_size = GRID_SIZE_HARD;
+                monster_size = MONSTER_SIZE_HARD;
+                heart_size = HEART_SIZE_HARD;
+                start_index = START_INDEX_HARD;
+                surprise_size = SURPRISE_SIZE_HARD;
+                break;
+            default:
+                printf("Invalid difficulty level. Using Medium as default.\n");
+                grid_size = GRID_SIZE_MEDIUM;
+                monster_size = MONSTER_SIZE_MEDIUM;
+                heart_size = HEART_SIZE_MEDIUM;
+                start_index = START_INDEX_MEDIUM;
+                surprise_size = 0;
+                break;
+            }
+        }
+        else {
+            printf("Invalid input. Using Medium as default.\n");
+            grid_size = GRID_SIZE_MEDIUM;
+            monster_size = MONSTER_SIZE_MEDIUM;
+            heart_size = HEART_SIZE_MEDIUM;
+            start_index = START_INDEX_MEDIUM;
+            surprise_size = 0;
+            while (getchar() != '\n');
+        }
+        used_indices.size = MAX_INDEX;
+        monsters.size = monster_size;
+        hearts.size = heart_size;
+        surprise.size = surprise_size;
+
+
+        int grid_max = grid_size * grid_size;
+        used_indices.used_locations[0] = 0;
+        monsters.locations[0] = 0;
+        hearts.locations[0] = 0;
+        surprise.locations[0] = 0;
+
+        //calc the 'random' position for the game
+        exit_result = exit_calc(grid_max);
+        put_monster(monsters.locations, monsters.size, grid_max);
+        put_heart(hearts.locations, hearts.size, grid_max);
+        put_surprise(surprise.locations, surprise.size, grid_max);
+        //===============
+
+        //to self info-----------------------------------------------------------
+        for_self_info(exit_result, monsters, hearts, surprise);
+        //-------------------------------------------------------
+
+        //check if there are any doubles------------------------------------
+        for (int i = 0; i < 5; i++) {
+            exit_result = check_exit_if_zero(exit_result);
+            check_double_with_exit(monsters.locations, monsters.size, exit_result, grid_max);
+            check_double_with_exit(hearts.locations, hearts.size, exit_result, grid_max);
+            check_double_with_exit(surprise.locations, surprise.size, exit_result, grid_max);
+            check_monster_heart_double(monsters.locations, monsters.size, hearts.locations, hearts.size, grid_max);
+            check_surprise_diffrent_double(surprise.locations, surprise.size, monsters.locations, monsters.size, grid_max);
+            check_surprise_diffrent_double(surprise.locations, surprise.size, hearts.locations, hearts.size, grid_max);
+            check_if_double(surprise.locations, surprise.size, grid_max);
+            check_if_double(monsters.locations, monsters.size, grid_max);
+            check_if_double(hearts.locations, hearts.size, grid_max);
+        }
+        //------------------------------------------------------------------------
+
+        //for self info------------------------------------------------------
+        for_self_info(exit_result, monsters, hearts, surprise);
+        //----------------------------------------------------
+    }
+    else {
+        // If game loaded, no need to set up new game parameters
+    }
+
+    //the games begin after all the calc and after getting the difficulty level (or loading)
+    game(exit_result, monsters, hearts, current_heart, grid_size, start_index, surprise, used_indices, load_flag);
+    return 0;
+}
+
